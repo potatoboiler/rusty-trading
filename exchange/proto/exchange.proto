@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package exchange;
+
+service Exchange {
+    rpc SubmitOrder(OrderRequest) returns (OrderReply) {}
+}
+
+message OrderRequest {
+    string a = 1;
+}
+message OrderReply {
+    string a = 1;
+}
