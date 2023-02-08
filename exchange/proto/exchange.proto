@@ -3,12 +3,12 @@ syntax = "proto3";
 package exchange;
 
 service Exchange {
-    rpc SubmitOrder(OrderRequest) returns (OrderReply) {}
+    rpc SubmitOrder(SubmitOrderRequest) returns (SubmitOrderReply) {}
 }
 
-message OrderRequest {
+message SubmitOrderRequest {
     string a = 1;
 }
-message OrderReply {
+message SubmitOrderReply {
     string a = 1;
 }
