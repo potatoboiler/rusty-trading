@@ -4,11 +4,19 @@ package exchange;
 
 service Exchange {
     rpc SubmitOrder(SubmitOrderRequest) returns (SubmitOrderReply) {}
+    rpc CancelOrder(CancelOrderRequest) returns (CancelOrderReply) {}
 }
 
 message SubmitOrderRequest {
     string a = 1;
 }
 message SubmitOrderReply {
+    string a = 1;
+}
+
+message CancelOrderRequest {
+    string a = 1;
+}
+message CancelOrderReply {
     string a = 1;
 }

@@ -3,11 +3,13 @@ use rpc::exchange::exchange_server;
 use std::collections::HashMap;
 use tonic::transport::Server;
 
-use types::{Symbol, Tokens};
+use types::Symbol;
 
-enum OrderType {
-    Limit,
-    Market,
+mod limit_order_book;
+
+enum BuySell {
+    Buy,
+    Sell,
 }
 // Order types?
 // take profit
@@ -15,90 +17,25 @@ enum OrderType {
 // market order, limmit
 // https://www.investopedia.com/trading-order-types-and-processes-4689649
 
-enum Action {
-    Buy,
-    Sell,
-}
-
 mod types {
     pub(crate) type Tokens = u32; // 10000 Tokens ~ $1 USD
-    pub(crate) type Timestaamp = u128;
+                                  /*
+                                      Decoupling event time and processing time
+                                  To reduce the lack of certainty with respect to out of order events, the system should decouple event time from processing time. This would mean that the system should avoid relying on system-wide cursors to determine if a post is ‘new’ (and therefore, due for publication). Instead, it should maintain a blog-level cursor: a post will be considered a ‘new’ post, if it bears a timestamp (event time) that is greater than the timestamp of the last post of that blog.
+                                  */
+    pub(crate) type Timestamp = u64;
     pub(crate) type Id = usize;
     pub(crate) type Symbol = String;
-}
 
-#[repr(transparent)]
-struct Price {
-    price: Tokens,
+    pub(crate) type Price = Tokens;
 }
 
 struct Account {
     owned: HashMap<Symbol, u32>,
 }
 
-struct MarketBook {}
-
-mod limit_order_book {
-    use std::{
-        cell::Cell,
-        collections::{BTreeMap, VecDeque},
-    };
-
-    use tonic::{Request, Response, Status};
-
-    use crate::{
-        rpc::exchange::{exchange_server, SubmitOrderReply, SubmitOrderRequest},
-        types::{Id, Symbol, Tokens},
-    };
-
-    /// https://gist.github.com/halfelf/db1ae032dc34278968f8bf31ee999a25
-    #[derive(Clone)]
-    struct LimitOrder {
-        order_id: Id,
-        shares: usize,
-        entry_time: usize,
-        event_time: Option<usize>,
-    }
-
-    /// https://gist.github.com/halfelf/db1ae032dc34278968f8bf31ee999a25
-    #[derive(Clone)]
-    struct Limit {
-        price: Tokens, // unnecessary?
-        size: usize,   // difference between total_volume field?
-        total_volume: usize,
-        symbol: Symbol,
-        orders: VecDeque<LimitOrder>,
-    }
-    impl Limit {
-        fn new() -> Self {
-            todo!()
-        }
-    }
-
-    /// https://gist.github.com/halfelf/db1ae032dc34278968f8bf31ee999a25
-    /// Source suggests exploring using a sparse array instead of a treemap
-    pub(crate) struct LimitBook<'a> {
-        buyTree: BTreeMap<Tokens, Limit>,
-        sellTree: BTreeMap<Tokens, Limit>,
-        lowestSell: Option<&'a Limit>,
-        highestBuy: Option<&'a Limit>, // pointer to?
-    }
-
-    impl<'a> LimitBook<'a> {
-        pub(crate) fn new() -> Self {
-            todo!()
-        }
-    }
-
-    #[tonic::async_trait]
-    impl<'a: 'static> exchange_server::Exchange for LimitBook<'a> {
-        async fn submit_order(
-            &self,
-            req: Request<SubmitOrderRequest>,
-        ) -> Result<Response<SubmitOrderReply>, Status> {
-            todo!()
-        }
-    }
+mod market_book {
+    struct _MarketBook {}
 }
 
 pub mod rpc {
@@ -107,18 +44,11 @@ pub mod rpc {
     }
 }
 
-struct Order {
-    id: usize,
-    order_type: OrderType,
-    shares: usize,
-    limit: usize,
-}
-
 pub async fn start() -> Result<()> {
     let addr = "127.0.0.1:6969".parse().unwrap();
     let limit_book: limit_order_book::LimitBook = limit_order_book::LimitBook::new();
 
-    tokio::spawn(async move { todo!() });
+    // tokio::spawn(async move { todo!() });
 
     let svc = exchange_server::ExchangeServer::new(limit_book);
     Server::builder().add_service(svc).serve(addr).await?;
@@ -128,5 +58,15 @@ pub async fn start() -> Result<()> {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     println!("Hello, world!");
+    start().await?;
     Ok(())
 }
+
+// Useful links:
+// - https://www.investopedia.com/ask/answers/05/buystoplimit.asp
+// Order Flow Payments - https://www.sec.gov/news/studies/ordpay.htm ?
+// https://www.cmegroup.com/education/courses/things-to-know-before-trading-cme-futures/what-happens-when-you-submit-an-order.html
+//
+
+
+// TODO: create new module for account bookkeeping and possibly for order matching services? and order execution?
