@@ -18,7 +18,7 @@ enum BuySell {
 // https://www.investopedia.com/trading-order-types-and-processes-4689649
 
 mod types {
-    pub(crate) type Tokens = u32; // 10000 Tokens ~ $1 USD
+    pub(crate) type Tokens = i64; // 10000 Tokens ~ $1 USD
                                   /*
                                       Decoupling event time and processing time
                                   To reduce the lack of certainty with respect to out of order events, the system should decouple event time from processing time. This would mean that the system should avoid relying on system-wide cursors to determine if a post is ‘new’ (and therefore, due for publication). Instead, it should maintain a blog-level cursor: a post will be considered a ‘new’ post, if it bears a timestamp (event time) that is greater than the timestamp of the last post of that blog.
