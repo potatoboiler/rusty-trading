@@ -73,6 +73,8 @@ pub(crate) struct LimitBook<'a> {
 }
 
 impl<'a> LimitBook<'a> {
+    // TODO: update lowest_sell and highest_buy fields in order matching function
+
     pub(crate) fn new() -> Self {
         Self {
             buy_tree: Default::default(),
@@ -112,38 +114,36 @@ impl<'a> LimitBook<'a> {
         // TODO: fast path to place order if none exist? should not be needed as it is a one-time edge case?
 
         // FIXME: reverse the ordering on one of the execution trees so we can make this fully generic
-        let execution_tree_iter = execution_tree.range_mut((Included(query_limit), Unbounded));
+        let execution_tree_iter = execution_tree
+            .range_mut((Included(query_limit), Unbounded))
+            .filter(|(_, limit)| limit.symbol == symbol);
 
         let mut shares = shares;
-        let mut transferred_tokens = 0_usize;
-        let remainder_order: Option<LimitOrder> = 'matching: {
-            for (&limit_price, limit) in execution_tree_iter {
-                let order_iter = limit.orders.iter_mut();
-                for order in order_iter {
-                    if shares > 0 {
-                        // TODO: verify that the buyer still has money (when copying over to buy side, make sure the buyer actually has money)
-                        // TODO: implement collateral so that we don't need to do the above per round
-                        let transferred_shares = min(order.shares, shares);
+        let mut _transferred_tokens = 0_usize;
 
-                        shares -= transferred_shares;
-                        order.shares -= transferred_shares;
-                        transferred_tokens += transferred_shares * (limit_price as usize);
+        'looper: for (&limit_price, limit) in execution_tree_iter {
+            let order_iter = limit.orders.iter_mut();
+            for order in order_iter {
+                if shares > 0 {
+                    // TODO: verify that the buyer still has money (when copying over to buy side, make sure the buyer actually has money)
+                    // TODO: implement collateral so that we don't need to do the above per round
+                    let transferred_shares = min(order.shares, shares);
 
-                        // TODO: transfer money from buyer to seller
-                        if order.shares == 0 {
-                            // TODO: delete more elegantly, possibly using by refactoring order loop to retain_mut? Might have to use .all() instead to short-circuit.
-                            order.live = false;
-                        }
-                    } else {
-                        break 'matching None; // we will always reach this condition if the order is completely filled!
+                    shares -= transferred_shares;
+                    order.shares -= transferred_shares;
+                    _transferred_tokens += transferred_shares * (limit_price as usize);
+
+                    // TODO: transfer money from buyer to seller
+                    if order.shares == 0 {
+                        // TODO: delete more elegantly, possibly using by refactoring order loop to retain_mut? Might have to use .all() instead to short-circuit.
+                        order.live = false;
                     }
+                } else {
+                    break 'looper;
                 }
-                // TODO: construct new Limit Order and place this on the buy tree (need a message queue?)
-                limit.orders.retain(|order| order.live); // TODO: terminate this upon seeing the first True value (because of in-order iteration)
-                                                         // TODO: garbage collect limits as well, figure out tif this should be done in a separate procedure?
             }
-            Some(LimitOrder::new(shares))
-        };
+            limit.orders.retain(|order| order.live); // TODO: terminate this upon seeing the first True value (because of in-order iteration)
+        }
         execution_tree.retain(|_, limit| limit.orders.len() > 0); // FIXME: see if in practice, this check takes up more time than just iterating over dead limits
         drop(execution_tree);
 
@@ -159,15 +159,6 @@ impl<'a> LimitBook<'a> {
             .or_insert(Limit::new(limit, symbol, 0))
             .insert_order(shares);
         };
-    }
-
-    async fn insert_order(&mut self, limit_price: Tokens, order: LimitOrder, action: BuySell) {
-        let mut opposite_tree = match action {
-            BuySell::Buy => &self.buy_tree,
-            BuySell::Sell => &self.sell_tree,
-        }
-        .write()
-        .await;
     }
 
     pub(crate) fn cancel_order() {}
