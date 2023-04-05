@@ -1,10 +1,12 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    cmp::min,
+    collections::{btree_map, BTreeMap, VecDeque},
+    ops::Bound::{Excluded, Included, Unbounded},
     sync::Arc,
 };
 
 use tokio::sync::RwLock;
-use tonic::{Request, Response, Status};
+use tonic::{metadata::IterMut, Request, Response, Status};
 
 use crate::{
     rpc::exchange::{
@@ -15,11 +17,12 @@ use crate::{
 };
 
 /// https://gist.github.com/halfelf/db1ae032dc34278968f8bf31ee999a25
-struct LimitOrder {
+pub(crate) struct LimitOrder {
     order_id: Id,
     shares: usize,
     entry_time: Timestamp,
     event_time: Option<Timestamp>,
+    live: bool,
 }
 impl LimitOrder {
     fn new(shares: usize) -> Self {
@@ -28,6 +31,7 @@ impl LimitOrder {
             shares,
             entry_time: todo!(),
             event_time: todo!(),
+            live: true,
         }
     }
 }
@@ -73,36 +77,80 @@ impl<'a> LimitBook<'a> {
         Self {
             buy_tree: Default::default(),
             sell_tree: Default::default(),
-            lowest_sell: None,
-            highest_buy: None,
+            lowest_sell: None, // ask price
+            highest_buy: None, // bid price
         }
     }
 
-    pub(crate) async fn place_order(
+    pub(crate) async fn execute_placed_limit_order(
         &mut self,
         limit: Tokens,
         shares: usize,
         symbol: Symbol,
         action: BuySell,
-    ) {
-        let mut tree = match action {
-            BuySell::Buy => self.buy_tree.write(),
-            BuySell::Sell => self.sell_tree.write(),
+    ) -> Option<LimitOrder> {
+        // matching references:
+        // http://web.archive.org/web/20120626161034/http://www.cmegroup.com/confluence/display/EPICSANDBOX/Match+Algorithms
+        // https://stackoverflow.com/questions/13112062/which-are-the-order-matching-algorithms-most-commonly-used-by-electronic-financi
+        // https://stackoverflow.com/questions/15603315/efficient-data-structures-for-data-matching
+        // https://corporatefinanceinstitute.com/resources/capital-markets/matching-orders/
+        let mut execution_tree = match action {
+            BuySell::Sell => &self.buy_tree,
+            BuySell::Buy => &self.sell_tree,
         }
+        .write()
         .await;
+        let execution_tree_iter = execution_tree.iter_mut();
 
-        if tree.contains_key(&limit) {
-            tree.get_mut(&limit).unwrap().insert_order(shares);
-        } else {
-            tree.insert(limit, Limit::new(limit, symbol, shares));
-        }
+        let mut shares = shares;
+        let remainder_order: Option<LimitOrder> = match action {
+            BuySell::Sell => 'matching: {
+                let mut transferred_tokens = 0_usize;
+                let limit_iter = execution_tree_iter.rev();
+                for (&limit_price, limit) in limit_iter {
+                    let order_iter = limit.orders.iter_mut();
+                    for order in order_iter {
+                        if shares > 0 {
+                            // TODO: verify that the buyer still has money (when copying over to buy side, make sure the buyer actually has money)
+                            // TODO: implement collateral so that we don't need to do the above per round
+                            let transferred_shares = min(order.shares, shares);
+
+                            shares -= transferred_shares;
+                            order.shares -= transferred_shares;
+                            transferred_tokens += transferred_shares * (limit_price as usize);
+
+                            // TODO: transfer money from buyer to seller
+                            if order.shares == 0 {
+                                // TODO: delete more elegantly, possibly using by refactoring order loop to retain_mut? Might have to use .all() instead to short-circuit.
+                                order.live = false;
+                            }
+                        } else {
+                            break 'matching None; // we will always reach this condition if the order is completely filled!
+                        }
+                    }
+                    // TODO: construct new Limit Order and place this on the buy tree (need a message queue?)
+                    limit.orders.retain(|order| order.live); // TODO: terminate this upon seeing the first True value (because of in-order iteration)
+                                                             // TODO: garbage collect limits as well, figure out tif this should be done in a separate procedure?
+                }
+                // FIXME: possibly redundant check
+                Some(LimitOrder::new(shares))
+            }
+            BuySell::Buy => {
+                todo!()
+                // let limit_iter = execution_tree_iter;
+                // for limit in limit_iter {
+                // if shares > 0 {
+                // let order_iter = limit.1;
+
+                // shares -= 1;
+                // } else {
+                // }
+                // }
+            }
+        };
+        remainder_order
     }
-    pub(crate) fn execute_order() {
-        // pop order from tree
-        // move orders around account storage
-        // update limit volume + size
-        // need a way to query all volumes + sizes?  TODO for later
-    }
+
     pub(crate) fn cancel_order() {}
 }
 
@@ -126,3 +174,5 @@ impl exchange_server::Exchange for LimitBook<'static> {
         }))
     }
 }
+
+// TODO: implement LMAX Disruptor architecture

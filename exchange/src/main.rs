@@ -35,7 +35,8 @@ struct Account {
 }
 
 mod market_book {
-    struct _MarketBook {}
+    // https://www.investopedia.com/ask/answers/061615/how-companys-share-price-determined.asp
+    struct MarketBook {}
 }
 
 pub mod rpc {
@@ -66,7 +67,13 @@ async fn main() -> Result<()> {
 // - https://www.investopedia.com/ask/answers/05/buystoplimit.asp
 // Order Flow Payments - https://www.sec.gov/news/studies/ordpay.htm ?
 // https://www.cmegroup.com/education/courses/things-to-know-before-trading-cme-futures/what-happens-when-you-submit-an-order.html
-//
+// https://www.greenwich.com/blog/difference-between-price-makers-and-market-makers - in case i try to simulate a market maker here
+// https://www.youtube.com/watch?v=b1e4t2k2KJY
+// https://www.investopedia.com/ask/answers/061615/how-companys-share-price-determined.asp
+// https://www.sciencedirect.com/science/article/pii/S2214845016301090 - Limit order placement by high-frequency traders 
+// https://www.investopedia.com/terms/b/batchtrading.asp
+// https://github.com/Kautenja/limit-order-book/blob/master/notes/lob.md
+
 
 
 // TODO: create new module for account bookkeeping and possibly for order matching services? and order execution?
