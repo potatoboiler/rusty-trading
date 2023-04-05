@@ -74,6 +74,7 @@ pub(crate) struct LimitBook<'a> {
 
 impl<'a> LimitBook<'a> {
     // TODO: update lowest_sell and highest_buy fields in order matching function
+    // TODO: refactor to have different buy/sell trees for each symbol, but this should work for now (at low frequencies)
 
     pub(crate) fn new() -> Self {
         Self {
@@ -121,7 +122,7 @@ impl<'a> LimitBook<'a> {
         let mut shares = shares;
         let mut _transferred_tokens = 0_usize;
 
-        'looper: for (&limit_price, limit) in execution_tree_iter {
+        'outer: for (&limit_price, limit) in execution_tree_iter {
             let order_iter = limit.orders.iter_mut();
             for order in order_iter {
                 if shares > 0 {
@@ -139,12 +140,12 @@ impl<'a> LimitBook<'a> {
                         order.live = false;
                     }
                 } else {
-                    break 'looper;
+                    break 'outer;
                 }
             }
             limit.orders.retain(|order| order.live); // TODO: terminate this upon seeing the first True value (because of in-order iteration)
         }
-        execution_tree.retain(|_, limit| limit.orders.len() > 0); // FIXME: see if in practice, this check takes up more time than just iterating over dead limits
+        execution_tree.retain(|_, limit| !limit.orders.is_empty()); // FIXME: see if in practice, this check takes up more time than just iterating over dead limits
         drop(execution_tree);
 
         // FIXME: beware deadlock? refactor by grabbing both locks on entrance
