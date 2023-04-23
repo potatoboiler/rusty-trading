@@ -1,18 +1,17 @@
 use std::{
     cmp::min,
-    collections::{btree_map, BTreeMap, VecDeque},
-    ops::Bound::{Excluded, Included, Unbounded},
-    sync::Arc,
+    collections::{BTreeMap, VecDeque},
+    ops::Bound::{Included, Unbounded},
 };
 
 use tokio::sync::RwLock;
-use tonic::{metadata::IterMut, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
 use crate::{
     rpc::exchange::{
         exchange_server, CancelOrderReply, CancelOrderRequest, SubmitOrderReply, SubmitOrderRequest,
     },
-    types::{Id, Price, Symbol, Timestamp, Tokens},
+    types::{Id, Symbol, Timestamp, Tokens},
     BuySell,
 };
 
@@ -93,7 +92,7 @@ impl<'a> LimitBook<'a> {
         action: BuySell,
     ) {
         // TODO: be able to send to specific users based on... GUID?
-        // TODO:
+        // TODO: generate and return a transaction receipt
 
         // matching references:
         // http://web.archive.org/web/20120626161034/http://www.cmegroup.com/confluence/display/EPICSANDBOX/Match+Algorithms
