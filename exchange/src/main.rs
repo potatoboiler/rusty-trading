@@ -56,7 +56,7 @@ pub async fn start() -> Result<()> {
     Ok(())
 }
 
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main]
 async fn main() -> Result<()> {
     println!("Hello, world!");
     start().await?;

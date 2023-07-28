@@ -1,7 +1,9 @@
 use std::{
+    cell::RefCell,
     cmp::min,
     collections::{BTreeMap, VecDeque},
     ops::Bound::{Included, Unbounded},
+    sync::Arc,
 };
 
 use tokio::sync::RwLock;
@@ -61,17 +63,17 @@ impl Limit {
 
 /// https://gist.github.com/halfelf/db1ae032dc34278968f8bf31ee999a25
 /// Source suggests exploring using a sparse array instead of a treemap
-pub(crate) struct LimitBook<'a> {
-    buy_tree: RwLock<BTreeMap<Tokens, Limit>>,
-    sell_tree: RwLock<BTreeMap<Tokens, Limit>>,
-    lowest_sell: Option<&'a Limit>,
-    highest_buy: Option<&'a Limit>, // pointer to?
+pub(crate) struct LimitBook {
+    buy_tree: Arc<RwLock<BTreeMap<Tokens, Limit>>>,
+    sell_tree: Arc<RwLock<BTreeMap<Tokens, Limit>>>,
+    // lowest_sell: Option<Arc<RefCell<Limit>>>,
+    // highest_buy: Option<Arc<RefCell<Limit>>>, // pointer to?
 
-                                    // TODO:
-                                    // past_orders:
+    // TODO:
+    // past_orders:
 }
 
-impl<'a> LimitBook<'a> {
+impl LimitBook {
     // TODO: update lowest_sell and highest_buy fields in order matching function
     // TODO: refactor to have different buy/sell trees for each symbol, but this should work for now (at low frequencies)
 
@@ -79,8 +81,8 @@ impl<'a> LimitBook<'a> {
         Self {
             buy_tree: Default::default(),
             sell_tree: Default::default(),
-            lowest_sell: None, // ask price
-            highest_buy: None, // bid price
+            // lowest_sell: None, // ask price
+            // highest_buy: None, // bid price
         }
     }
 
@@ -165,7 +167,7 @@ impl<'a> LimitBook<'a> {
 }
 
 #[tonic::async_trait]
-impl exchange_server::Exchange for LimitBook<'static> {
+impl exchange_server::Exchange for LimitBook {
     async fn submit_order(
         &self,
         req: Request<SubmitOrderRequest>,
