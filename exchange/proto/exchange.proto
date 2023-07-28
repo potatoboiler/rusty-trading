@@ -3,15 +3,32 @@ syntax = "proto3";
 package exchange;
 
 service Exchange {
-    rpc SubmitOrder(SubmitOrderRequest) returns (SubmitOrderReply) {}
+    rpc SubmitLimitOrder(SubmitLimitOrderRequest) returns (SubmitLimitOrderReply) {}
+    rpc SubmitMarketOrder(SubmitMarketOrderRequest) returns (SubmitMarketOrderReply) {}
     rpc CancelOrder(CancelOrderRequest) returns (CancelOrderReply) {}
 }
 
-message SubmitOrderRequest {
-    string a = 1;
+enum ACTION {
+    BUY = 0;
+    SELL = 1;
 }
-message SubmitOrderReply {
-    string a = 1;
+
+message SubmitLimitOrderRequest {
+    string ticker = 1;
+    uint64 shares = 2;
+    int64 limit  = 3;
+    ACTION action = 4;
+}
+message SubmitLimitOrderReply {
+    optional string order_id = 1;
+    optional string message = 2;
+}
+
+message SubmitMarketOrderRequest {
+
+}
+message SubmitMarketOrderReply {
+
 }
 
 message CancelOrderRequest {

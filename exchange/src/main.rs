@@ -5,6 +5,7 @@ use tonic::transport::Server;
 
 use types::Symbol;
 
+mod db;
 mod limit_order_book;
 
 enum BuySell {
@@ -18,13 +19,15 @@ enum BuySell {
 // https://www.investopedia.com/trading-order-types-and-processes-4689649
 
 mod types {
+    use uuid::Uuid;
+
     pub(crate) type Tokens = i64; // 10000 Tokens ~ $1 USD
                                   /*
                                       Decoupling event time and processing time
                                   To reduce the lack of certainty with respect to out of order events, the system should decouple event time from processing time. This would mean that the system should avoid relying on system-wide cursors to determine if a post is ‘new’ (and therefore, due for publication). Instead, it should maintain a blog-level cursor: a post will be considered a ‘new’ post, if it bears a timestamp (event time) that is greater than the timestamp of the last post of that blog.
                                   */
     pub(crate) type Timestamp = u64;
-    pub(crate) type Id = usize;
+    pub(crate) type Id = Uuid;
     pub(crate) type Symbol = String;
 
     pub(crate) type Price = Tokens;
@@ -41,6 +44,7 @@ mod market_book {
 
 pub mod rpc {
     pub mod exchange {
+        #![allow(non_snake_case)]
         include!("proto/exchange.rs");
     }
 }
@@ -70,10 +74,8 @@ async fn main() -> Result<()> {
 // https://www.greenwich.com/blog/difference-between-price-makers-and-market-makers - in case i try to simulate a market maker here
 // https://www.youtube.com/watch?v=b1e4t2k2KJY
 // https://www.investopedia.com/ask/answers/061615/how-companys-share-price-determined.asp
-// https://www.sciencedirect.com/science/article/pii/S2214845016301090 - Limit order placement by high-frequency traders 
+// https://www.sciencedirect.com/science/article/pii/S2214845016301090 - Limit order placement by high-frequency traders
 // https://www.investopedia.com/terms/b/batchtrading.asp
 // https://github.com/Kautenja/limit-order-book/blob/master/notes/lob.md
-
-
 
 // TODO: create new module for account bookkeeping and possibly for order matching services? and order execution?

@@ -7,10 +7,12 @@ use std::{
 
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
+use uuid::Uuid;
 
 use crate::{
     rpc::exchange::{
-        exchange_server, CancelOrderReply, CancelOrderRequest, SubmitOrderReply, SubmitOrderRequest,
+        exchange_server, CancelOrderReply, CancelOrderRequest, SubmitLimitOrderReply,
+        SubmitLimitOrderRequest, SubmitMarketOrderReply, SubmitMarketOrderRequest,
     },
     types::{Id, Symbol, Timestamp, Tokens},
     BuySell,
@@ -27,7 +29,7 @@ pub(crate) struct LimitOrder {
 impl LimitOrder {
     fn new(shares: usize) -> Self {
         Self {
-            order_id: todo!(),
+            order_id: Uuid::new_v4(),
             shares,
             entry_time: todo!(),
             event_time: todo!(),
@@ -53,8 +55,12 @@ impl Limit {
         }
     }
 
-    fn insert_order(&mut self, size: usize) {
-        self.orders.push_back(LimitOrder::new(size));
+    fn insert_order(&mut self, size: usize) -> Uuid {
+        let order = LimitOrder::new(size);
+        let order_id = order.order_id.clone();
+        self.orders.push_back(order);
+
+        order_id
     }
 }
 
@@ -84,13 +90,15 @@ impl LimitBook {
         }
     }
 
+    /// Only returns the order of the remainder, because we will use a separate service(?) for actual order queueing.
+    /// This function reduces as much as possible to manipulating internal state of the exchange.
     pub(crate) async fn execute_placed_limit_order(
-        &mut self,
+        &self,
         limit: Tokens,
         shares: usize,
         symbol: Symbol,
         action: BuySell,
-    ) {
+    ) -> Result<Option<Uuid>, anyhow::Error> {
         // TODO: be able to send to specific users based on... GUID?
         // TODO: generate and return a transaction receipt
 
@@ -115,77 +123,105 @@ impl LimitBook {
         };
         // TODO: fast path to place order if none exist? should not be needed as it is a one-time edge case?
 
-        // FIXME: reverse the ordering on one of the execution trees so we can make this fully generic
-        let execution_tree_iter = execution_tree.range_mut((Included(query_limit), Unbounded));
+        {
+            // FIXME: reverse the ordering on one of the execution trees so we can make this fully generic
+            let execution_tree_iter = execution_tree.range_mut((Included(query_limit), Unbounded));
 
-        let mut shares = shares;
-        let mut _transferred_tokens = 0_usize;
+            let mut shares = shares;
+            let mut _transferred_tokens = 0_usize;
 
-        'outer: for (&limit_price, limit) in execution_tree_iter {
-            let order_iter = limit.orders.iter_mut();
-            for order in order_iter {
-                if shares > 0 {
-                    // TODO: verify that the buyer still has money (when copying over to buy side, make sure the buyer actually has money)
-                    // TODO: implement collateral so that we don't need to do the above per round
-                    let transferred_shares = min(order.shares, shares);
+            'outer: for (&limit_price, limit) in execution_tree_iter {
+                let order_iter = limit.orders.iter_mut();
+                for order in order_iter {
+                    if shares > 0 {
+                        // TODO: verify that the buyer still has money (when copying over to buy side, make sure the buyer actually has money)
+                        // TODO: implement collateral so that we don't need to do the above per round
+                        let transferred_shares = min(order.shares, shares);
 
-                    shares -= transferred_shares;
-                    order.shares -= transferred_shares;
-                    _transferred_tokens += transferred_shares * (limit_price as usize);
+                        shares -= transferred_shares;
+                        order.shares -= transferred_shares;
+                        _transferred_tokens += transferred_shares * (limit_price as usize);
 
-                    // TODO: transfer money from buyer to seller
-                    if order.shares == 0 {
-                        // TODO: delete more elegantly, possibly using by refactoring order loop to retain_mut? Might have to use .all() instead to short-circuit.
-                        order.live = false;
+                        // TODO: transfer money from buyer to seller
+                        if order.shares == 0 {
+                            // TODO: delete more elegantly, possibly using by refactoring order loop to retain_mut? Might have to use .all() instead to short-circuit.
+                            order.live = false;
+                        }
+                    } else {
+                        break 'outer;
                     }
-                } else {
-                    break 'outer;
                 }
+                limit.orders.retain(|order| order.live); // TODO: terminate this upon seeing the first True value (because of in-order iteration)
             }
-            limit.orders.retain(|order| order.live); // TODO: terminate this upon seeing the first True value (because of in-order iteration)
+            execution_tree.retain(|_, limit| !limit.orders.is_empty()); // FIXME: see if in practice, this check takes up more time than just iterating over dead limits
         }
-        execution_tree.retain(|_, limit| !limit.orders.is_empty()); // FIXME: see if in practice, this check takes up more time than just iterating over dead limits
-        drop(execution_tree);
 
         // FIXME: beware deadlock? refactor by grabbing both locks on entrance
         if shares > 0 {
-            match action {
+            let standing_order_id = match action {
                 BuySell::Buy => &self.buy_tickers,
                 BuySell::Sell => &self.sell_tickers,
             }
             .read()
             .await
             .get(&symbol)
-            .unwrap()
+            .expect("Symbol should have been inserted upon initialization!")
             .write()
             .await
             .entry(query_limit)
             .or_insert(Limit::new(limit, symbol, 0))
             .insert_order(shares);
-        };
+
+            Ok(Some(standing_order_id))
+        } else {
+            Ok(None)
+        }
     }
 
-    pub(crate) fn cancel_order() {}
+    pub(crate) fn cancel_order(&self) -> Result<(), anyhow::Error> {
+        todo!()
+    }
 }
 
 #[tonic::async_trait]
 impl exchange_server::Exchange for LimitBook {
-    async fn submit_order(
+    async fn submit_limit_order(
         &self,
-        req: Request<SubmitOrderRequest>,
-    ) -> Result<Response<SubmitOrderReply>, Status> {
-        Ok(Response::new(SubmitOrderReply {
-            a: "LOL".to_string(),
-        }))
+        req: Request<SubmitLimitOrderRequest>,
+    ) -> Result<Response<SubmitLimitOrderReply>, Status> {
+        let req = req.into_inner();
+        let (limit, shares, ticker) = (req.limit, req.shares as usize, req.ticker);
+        let action = match req.action {
+            0 => BuySell::Buy,
+            1 => BuySell::Sell,
+            _ => panic!("WTF how did you get here??"),
+        };
+        match self
+            .execute_placed_limit_order(limit, shares, ticker, action)
+            .await
+        {
+            Ok(order_id) => Ok(Response::new(SubmitLimitOrderReply {
+                order_id: order_id.map(|id| id.to_string()),
+                message: None,
+            })),
+            Err(e) => Err(Status::from_error(e.into())),
+        }
     }
 
     async fn cancel_order(
         &self,
         req: Request<CancelOrderRequest>,
     ) -> Result<Response<CancelOrderReply>, Status> {
-        Ok(Response::new(CancelOrderReply {
-            a: "LOL".to_string(),
-        }))
+        match self.cancel_order() {
+            _ => todo!(),
+        }
+    }
+
+    async fn submit_market_order(
+        &self,
+        req: Request<SubmitMarketOrderRequest>,
+    ) -> Result<Response<SubmitMarketOrderReply>, Status> {
+        todo!()
     }
 }
 
