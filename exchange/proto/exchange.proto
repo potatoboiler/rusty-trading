@@ -20,7 +20,7 @@ message SubmitLimitOrderRequest {
     ACTION action = 4;
 }
 message SubmitLimitOrderReply {
-    optional string order_id = 1;
+    optional bytes order_id = 1;
     optional string message = 2;
 }
 
@@ -32,7 +32,7 @@ message SubmitMarketOrderReply {
 }
 
 message CancelOrderRequest {
-    string a = 1;
+    bytes order_id = 1;
 }
 message CancelOrderReply {
     string a = 1;

@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use prost::bytes::Buf;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -57,7 +58,7 @@ impl Limit {
 
     fn insert_order(&mut self, size: usize) -> Uuid {
         let order = LimitOrder::new(size);
-        let order_id = order.order_id.clone();
+        let order_id = order.order_id;
         self.orders.push_back(order);
 
         order_id
@@ -178,7 +179,7 @@ impl LimitBook {
         }
     }
 
-    pub(crate) fn cancel_order(&self) -> Result<(), anyhow::Error> {
+    pub(crate) async fn cancel_order(&self, order_id: Uuid) -> Result<(), anyhow::Error> {
         todo!()
     }
 }
@@ -201,19 +202,31 @@ impl exchange_server::Exchange for LimitBook {
             .await
         {
             Ok(order_id) => Ok(Response::new(SubmitLimitOrderReply {
-                order_id: order_id.map(|id| id.to_string()),
+                order_id: order_id.map(|id| id.as_bytes().to_vec()), // TODO: does this copy?
                 message: None,
             })),
             Err(e) => Err(Status::from_error(e.into())),
         }
     }
 
+    /// Cancels a limit order.
     async fn cancel_order(
         &self,
         req: Request<CancelOrderRequest>,
     ) -> Result<Response<CancelOrderReply>, Status> {
-        match self.cancel_order() {
-            _ => todo!(),
+        // TODO: how to flatten this function?
+        let req = req.into_inner();
+        match TryInto::<[u8; 16]>::try_into(req.order_id.as_slice()) {
+            Ok(id) => {
+                let id = Uuid::from_bytes(id);
+                match self.cancel_order(id).await {
+                    Ok(()) => Ok(Response::new(CancelOrderReply {
+                        a: "You can rest happily now, your order has been cancelled :)".into(),
+                    })),
+                    Err(e) => Err(Status::from_error(e.into())),
+                }
+            }
+            Err(e) => Err(Status::from_error(e.into())),
         }
     }
 
