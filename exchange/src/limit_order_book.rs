@@ -1,7 +1,6 @@
 use std::{
-    cell::RefCell,
     cmp::min,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     ops::Bound::{Included, Unbounded},
     sync::Arc,
 };
@@ -42,7 +41,6 @@ struct Limit {
     price: Tokens,       // unnecessary?
     size: usize,         // difference between total_volume field? // unfilled order shares
     total_volume: usize, // actually filled orders
-    symbol: Symbol,
     orders: VecDeque<LimitOrder>,
 }
 impl Limit {
@@ -51,7 +49,6 @@ impl Limit {
             price,
             size,
             total_volume: 0,
-            symbol,
             orders: [LimitOrder::new(size)].into(),
         }
     }
@@ -61,11 +58,12 @@ impl Limit {
     }
 }
 
+type LimitBookTicker = Arc<RwLock<BTreeMap<Tokens, Limit>>>;
 /// https://gist.github.com/halfelf/db1ae032dc34278968f8bf31ee999a25
 /// Source suggests exploring using a sparse array instead of a treemap
 pub(crate) struct LimitBook {
-    buy_tree: Arc<RwLock<BTreeMap<Tokens, Limit>>>,
-    sell_tree: Arc<RwLock<BTreeMap<Tokens, Limit>>>,
+    buy_tickers: Arc<RwLock<HashMap<Symbol, LimitBookTicker>>>,
+    sell_tickers: Arc<RwLock<HashMap<Symbol, LimitBookTicker>>>,
     // lowest_sell: Option<Arc<RefCell<Limit>>>,
     // highest_buy: Option<Arc<RefCell<Limit>>>, // pointer to?
 
@@ -79,8 +77,8 @@ impl LimitBook {
 
     pub(crate) fn new() -> Self {
         Self {
-            buy_tree: Default::default(),
-            sell_tree: Default::default(),
+            buy_tickers: Default::default(),
+            sell_tickers: Default::default(),
             // lowest_sell: None, // ask price
             // highest_buy: None, // bid price
         }
@@ -101,12 +99,14 @@ impl LimitBook {
         // https://stackoverflow.com/questions/13112062/which-are-the-order-matching-algorithms-most-commonly-used-by-electronic-financi
         // https://stackoverflow.com/questions/15603315/efficient-data-structures-for-data-matching
         // https://corporatefinanceinstitute.com/resources/capital-markets/matching-orders/
-        let mut execution_tree = match action {
-            BuySell::Sell => &self.buy_tree,
-            BuySell::Buy => &self.sell_tree,
+        let execution_ticker = match action {
+            BuySell::Sell => &self.buy_tickers,
+            BuySell::Buy => &self.sell_tickers,
         }
-        .write()
+        .read()
         .await;
+
+        let mut execution_tree = execution_ticker.get(&symbol).unwrap().write().await;
         let query_limit = match action {
             // FIXME: buy tree contains buy orders, so when querying from sell limit, (+limit, +infinity)
             // sell tree econtains sell orders, so we want to see (-limit, +infinity)
@@ -116,9 +116,7 @@ impl LimitBook {
         // TODO: fast path to place order if none exist? should not be needed as it is a one-time edge case?
 
         // FIXME: reverse the ordering on one of the execution trees so we can make this fully generic
-        let execution_tree_iter = execution_tree
-            .range_mut((Included(query_limit), Unbounded))
-            .filter(|(_, limit)| limit.symbol == symbol);
+        let execution_tree_iter = execution_tree.range_mut((Included(query_limit), Unbounded));
 
         let mut shares = shares;
         let mut _transferred_tokens = 0_usize;
@@ -152,9 +150,13 @@ impl LimitBook {
         // FIXME: beware deadlock? refactor by grabbing both locks on entrance
         if shares > 0 {
             match action {
-                BuySell::Buy => &self.buy_tree,
-                BuySell::Sell => &self.sell_tree,
+                BuySell::Buy => &self.buy_tickers,
+                BuySell::Sell => &self.sell_tickers,
             }
+            .read()
+            .await
+            .get(&symbol)
+            .unwrap()
             .write()
             .await
             .entry(query_limit)
